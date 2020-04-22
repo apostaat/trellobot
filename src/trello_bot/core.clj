@@ -24,11 +24,14 @@
 
 
 (defn send-url-button
-  "Sends URL-button to the chat but I don't know how reply_markup works "
+  "Sends URL-button to the chat"
   ([token chat-id]
    (let [url  (str base-url token "/sendMessage")
-         body {:chat_id chat-id :text nil :reply_markup (json/generate-string {:text "2"
-                                                                                     :url "https://help.trello.com/article/809-creating-cards-by-email" })}
+         body {:chat_id chat-id :text "To create Trello e-mail use the link below. \n To create task in TrelloBot:\n Taskname \n Then enter task body using newline."
+               :reply_markup (json/generate-string
+                               {:inline_keyboard
+                                [[{:text "How to create Trello board e-mail (official docs)."
+                                   :url "https://help.trello.com/article/809-creating-cards-by-email" }]]})}
          resp (http/post url {:content-type :json
                               :as           :json
                               :form-params  body})]
@@ -41,13 +44,12 @@
       (if-let  [got-it (get @db (str id))]
         (t/send-text token id (str "Hello, " name "!" " Welcome to TrelloTaskBot. If this e-mail is NO LONGER valid: " got-it " - send us your e-mail via sending message with e-mail to bot."
                                  ))
-
         (t/send-text token id (str "Hello, " name "! " "Welcome to TrelloTaskBot. You're new user, so we need your Trello board e-mail." )))))
 
   (h/command-fn "help"
     (fn [{{id :id :as chat} :chat}]
       (println "Help was requested in " chat)
-      (t/send-text token id (str  "To create Trello e-mail use this: " "https://help.trello.com/article/809-creating-cards-by-email" "To create task in TrelloBot: Taskname \n Then enter task body using newline."))))
+      (send-url-button token id)))
 
 
   (h/message-fn
