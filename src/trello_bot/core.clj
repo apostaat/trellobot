@@ -22,6 +22,25 @@
   (not (empty? (slurp db-file)))
   (reset! db (read-string (slurp db-file))))
 
+(defn e-mail? [text]
+  (str/ends-with? text "@boards.trello.com" ))
+
+(defn old-user-logic [id new-or-old text]
+  (let [ split (str/split text #"\n")
+        subject (first split)]
+    (if (= 1 (count split))
+      (t/send-text token id "It's not a valid task message. Do this:
+                  Subject
+                  Body of task")
+      (do  (g/send-mail e-mail new-or-old subject (apply str (rest split))  secret )
+           (t/send-text token id (str "E-mail was sent to " new-or-old "Subject: " subject "Body: " (rest split) "."))))))
+
+(defn new-user-logic [text id]
+  (if (e-mail? text)
+    (do (swap! db assoc (str id) text )
+        (t/send-text token id (str "This e-mail: " text " will be used as for sending tasks to Trello."))
+        (spit db-file @db))
+    (t/send-text token id "It's not a valid Trello e-mail address. Use /help to get one.")))
 
 (defn send-url-button
   "Sends URL-button to the chat"
@@ -41,8 +60,8 @@
   (h/command-fn "start"
     (fn [{{id :id name :first_name :as chat} :chat}]
       (println "This one is connected: " chat )
-      (if-let  [got-it (get @db (str id))]
-        (t/send-text token id (str "Hello, " name "!" " Welcome to TrelloTaskBot. If this e-mail is NO LONGER valid: " got-it " - send us your e-mail via sending message with e-mail to bot."
+      (if-let [got-it (get @db (str id))]
+        (t/send-text token id (str "Hello, " name "!" " Welcome to TrelloTaskBot. Your e-mail is:" got-it "To change e-mail use /forgetme to delete your e-mail and then enter new e-mail."
                                  ))
         (t/send-text token id (str "Hello, " name "! " "Welcome to TrelloTaskBot. You're new user, so we need your Trello board e-mail." )))))
 
@@ -51,36 +70,27 @@
       (println "Help was requested in " chat)
       (send-url-button token id)))
 
+  (h/command-fn "forgetme"
+      (fn [{{id :id}  :chat :as message}]
+      (println "This user has been forgotten" (:id (:from message)))
+      (do (t/send-photo token id (io/file (io/resource "a.png")))
+          (swap! db dissoc (str id))
+          (spit db-file @db)
+          (http/post (str base-url token "/getUpdates?offset=" (apply :offset (:entities message)))))))
 
   (h/message-fn
     (fn [{{id :id}  :chat :as message}]
-      (let [text (:text message)]
+      (let [text (:text message)
+            new-or-old  (get @db (str id))]
         (println "Intercepted message: " message)
-        (if (str/ends-with? text "@boards.trello.com" )
-          (do (swap! db assoc (str id) text )
-              (t/send-text token id (str "This e-mail: " text " will be used as for sending tasks to Trello."))
-              (spit db-file @db))
-           (let [ split (str/split text #"\n")
-                  check-split  (count split)
-                  subject (first split)
-                  body (second split)
-                  recepient (get @db (str id))]
-            (case check-split
-              1 (if (some #(= % \@) message )
-                  (t/send-text token id "It's not a valid Trello e-mail address. Use /help to get one.")
-                  (t/send-text token id "It's not a valid task message. Do this:
-                  Subject
-                  Body of task"))
-              2 (do (g/send-mail e-mail recepient subject body secret)
-                    (t/send-text token id (str "E-mail was sent to " recepient "Subject: " subject "Body: " body ".") ))
-             (do  (g/send-mail e-mail recepient subject (apply str (rest split))  secret )
-                  (t/send-text token id (str "E-mail was sent to " recepient "Subject: " subject "Body: " body ".") )))
-            ))))))
+        (if new-or-old
+          (old-user-logic id new-or-old text)
+          (new-user-logic text id))))))
 
 (defn -main
   [& args]
   (when (str/blank? token)
-    (println "Please provde token in TELEGRAM_TOKEN environment variable!")
+    (println "Please provide token in TELEGRAM_TOKEN environment variable!")
     (System/exit 1))
 
   (println "Starting the trellotaskbot")
