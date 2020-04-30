@@ -42,20 +42,6 @@
         (spit db-file @db))
     (t/send-text token id "It's not a valid Trello e-mail address. Use /help to get one.")))
 
-(defn send-url-button
-  "Sends URL-button to the chat"
-  ([token chat-id]
-   (let [url  (str base-url token "/sendMessage")
-         body {:chat_id chat-id :text "To create Trello e-mail use the link below. \n To create task in TrelloBot:\n Taskname \n Then enter task body using newline."
-               :reply_markup (json/generate-string
-                               {:inline_keyboard
-                                [[{:text "How to create Trello board e-mail (official docs)."
-                                   :url "https://help.trello.com/article/809-creating-cards-by-email" }]]})}
-         resp (http/post url {:content-type :json
-                              :as           :json
-                              :form-params  body})]
-     (-> resp :body))))
-
 (h/defhandler handler
   (h/command-fn "start"
     (fn [{{id :id name :first_name :as chat} :chat}]
