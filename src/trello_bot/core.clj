@@ -18,37 +18,58 @@
 (def secret  (env :mail-password))
 (def base-url "https://api.telegram.org/bot")
 
-(when
-  (not (empty? (slurp db-file)))
-  (reset! db (read-string (slurp db-file))))
-
 (defn e-mail? [text]
   (str/ends-with? text "@boards.trello.com" ))
 
-(defn get-old-user-task [id new-or-old text]
-  (let [ split (str/split text #"\n")
-        subject (first split)]
-    (if (= 1 (count split))
-      (t/send-text token id "It's not a valid task message. Do this:
-                  Subject
-                  Body of task")
-      (do  (g/send-mail e-mail new-or-old subject (apply str (rest split))  secret )
-           (t/send-text token id (str "E-mail was sent to " new-or-old "Subject: " subject " Body: " (rest split) "."))))))
+(defn get-mail-from-db [id] (get @db (str id)))
 
-(defn get-new-user-mail [text id]
+(defn save [id text]
+  (swap! db assoc (str id) text )
+  (spit db-file @db))
+
+(defn delete [id]
+  (swap! db dissoc (str id))
+  (spit db-file @db))
+
+(defn my-mail-send
+
+  ([user-mail subject details id]
+                   (do  (g/send-mail e-mail user-mail subject
+                                     (apply str details)
+                                     secret )
+                        (t/send-text token id
+                                     (str "E-mail was sent to " user-mail
+                                          "Subject: " subject
+                                          " Body: " details "."))))
+  ([user-mail subject id]
+   (do  (g/send-mail e-mail user-mail subject
+                     " "
+                     secret )
+        (t/send-text token id
+                     (str "E-mail was sent to " user-mail
+                          "Subject: " subject ".")))))
+
+
+(defn create-old-user-task [id user-mail text]
+  (let [ [subject & details] (str/split-lines text) ]
+    (if (nil? details)
+      (my-mail-send user-mail subject id)
+      (my-mail-send user-mail subject (str/join "\n" details) id))))
+
+(defn save-new-user-mail [text id]
   (if (e-mail? text)
-    (do (swap! db assoc (str id) text )
-        (t/send-text token id (str "This e-mail: " text " will be used as for sending tasks to Trello."))
-        (spit db-file @db))
+    (do (save id text)
+        (t/send-text token id (str "This e-mail: " text " will be used as for sending tasks to Trello.")))
     (t/send-text token id "It's not a valid Trello e-mail address. Use /help to get one.")))
+
 
 (h/defhandler handler
   (h/command-fn "start"
     (fn [{{id :id name :first_name :as chat} :chat}]
       (println "This one is connected: " chat )
-      (if-let [got-it (get @db (str id))]
-        (t/send-text token id (str "Hello, " name "!" " Welcome to TrelloTaskBot. Your e-mail is:" got-it "To change e-mail use /forgetme to delete your e-mail and then enter new e-mail."
-                                 ))
+      (if (get-mail-from-db id )
+        (t/send-text token id
+                     (str "Hello, " name "!" " Welcome to TrelloTaskBot. Your e-mail is:" (get-mail-from-db id ) "To change e-mail use /forgetme to delete your e-mail and then enter new e-mail."))
         (t/send-text token id (str "Hello, " name "! " "Welcome to TrelloTaskBot. You're new user, so we need your Trello board e-mail." )))))
 
   (h/command-fn "help"
@@ -65,29 +86,26 @@
   (h/command-fn "forgetme"
       (fn [{{id :id}  :chat :as message}]
       (do (t/send-photo token id (io/file (io/resource "a.png")))
-          (swap! db dissoc (str id))
-          (spit db-file @db))))
+          (delete id))))
 
   (h/message-fn
     (fn [{{id :id}  :chat :as message}]
-      (let [text (:text message)
-            new-or-old  (get @db (str id))]
+      (let [text (:text message)]
         (if (= text "/forgetme")
           (println "This user has been forgotten" (:username (:from message)))
           (do (println "Intercepted message: " message)
-              (if new-or-old
-                (get-old-user-task id new-or-old text)
-                (get-new-user-mail text id))) )))))
+              (if (get-mail-from-db id )
+                (create-old-user-task id (get-mail-from-db id ) text)
+                (save-new-user-mail text id))))))))
 
 (defn -main
   [& args]
   (when (str/blank? token)
     (println "Please provide token in TELEGRAM_TOKEN environment variable!")
     (System/exit 1))
-
+  (when
+    (not (empty? (slurp db-file)))
+    (reset! db (read-string (slurp db-file))))
   (println "Starting the trellotaskbot")
   (<!! (p/start token handler)))
-
-(def wow (p/start token handler))
-(clojure.core.async/close! wow)
 
