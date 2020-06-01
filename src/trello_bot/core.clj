@@ -32,28 +32,20 @@
   (spit db-file @db))
 
 (defn my-mail-send
-
-  ([user-mail subject details id]
+  [user-mail subject details id]
                    (do  (g/send-mail e-mail user-mail subject
                                      (apply str details)
                                      secret )
                         (t/send-text token id
                                      (str "E-mail was sent to " user-mail
-                                          "Subject: " subject
-                                          " Body: " details "."))))
-  ([user-mail subject id]
-   (do  (g/send-mail e-mail user-mail subject
-                     " "
-                     secret )
-        (t/send-text token id
-                     (str "E-mail was sent to " user-mail
-                          "Subject: " subject ".")))))
+                                          " \nSubject: " subject
+                                          " \nBody: " details ))))
 
 
 (defn create-old-user-task [id user-mail text]
   (let [ [subject & details] (str/split-lines text) ]
     (if (nil? details)
-      (my-mail-send user-mail subject id)
+      (my-mail-send user-mail subject " " id)
       (my-mail-send user-mail subject (str/join "\n" details) id))))
 
 (defn save-new-user-mail [text id]
@@ -66,7 +58,6 @@
 (h/defhandler handler
   (h/command-fn "start"
     (fn [{{id :id name :first_name :as chat} :chat}]
-      (println "This one is connected: " chat )
       (if (get-mail-from-db id )
         (t/send-text token id
                      (str "Hello, " name "!" " Welcome to TrelloTaskBot. Your e-mail is:" (get-mail-from-db id ) "To change e-mail use /forgetme to delete your e-mail and then enter new e-mail."))
@@ -74,7 +65,6 @@
 
   (h/command-fn "help"
     (fn [{{id :id :as chat} :chat}]
-      (println "Help was requested in " chat)
       (t/send-text token id
                   {:reply_markup {:inline_keyboard
                                   [[{:text "How to create Trello board e-mail (official docs)."
@@ -91,10 +81,8 @@
   (h/message-fn
     (fn [{{id :id}  :chat :as message}]
       (let [text (:text message)]
-        (if (= text "/forgetme")
-          (println "This user has been forgotten" (:username (:from message)))
-          (do (println "Intercepted message: " message)
-              (if (get-mail-from-db id )
+        (when (not (= text "/forgetme"))
+          (do   (if (get-mail-from-db id )
                 (create-old-user-task id (get-mail-from-db id ) text)
                 (save-new-user-mail text id))))))))
 
@@ -103,9 +91,10 @@
   (when (str/blank? token)
     (println "Please provide token in TELEGRAM_TOKEN environment variable!")
     (System/exit 1))
-  (when
-    (not (empty? (slurp db-file)))
-    (reset! db (read-string (slurp db-file))))
-  (println "Starting the trellotaskbot")
+  (let [slurp-file (slurp db-file)]
+    (when
+      (not (empty? slurp-file))
+          (reset! db (read-string slurp-file))))
   (<!! (p/start token handler)))
+
 
